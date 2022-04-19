@@ -1,5 +1,3 @@
-package geektime.tdd
-
 plugins {
     java
     id("code-coverage")

@@ -1,3 +1,0 @@
-plugins {
-    geektime.tdd.common
-}
