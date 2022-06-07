@@ -12,8 +12,8 @@ import java.lang.annotation.Target;
 @Target({ElementType.PARAMETER})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Option {
-  /**
-   * 注解的值.
-   */
-  String value();
+    /**
+     * 注解的值.
+     */
+    String value();
 }

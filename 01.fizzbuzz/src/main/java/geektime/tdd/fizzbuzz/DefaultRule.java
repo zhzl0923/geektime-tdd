@@ -5,8 +5,8 @@ package geektime.tdd.fizzbuzz;
  */
 class DefaultRule implements Rule {
 
-  @Override
-  public String result(int number) {
-    return String.valueOf(number);
-  }
+    @Override
+    public String result(int number) {
+        return String.valueOf(number);
+    }
 }

@@ -35,11 +35,9 @@ tasks.withType<JacocoCoverageVerification> {
         val excludes = ArrayList<String>()
         codeCoverage.excludeClasses.forEach {
             excludes.add(it.replace('.', '/') + ".class")
-
         }
         codeCoverage.excludePackages.forEach {
             excludes.add(it.replace('.', '/') + "/*")
-
         }
         classDirectories.setFrom(files(classDirectories.files.map {
             fileTree(it).apply {

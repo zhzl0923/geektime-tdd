@@ -1,5 +1,5 @@
 package geektime.tdd.fizzbuzz;
 
 interface Rule {
-  String result(int number);
+    String result(int number);
 }
