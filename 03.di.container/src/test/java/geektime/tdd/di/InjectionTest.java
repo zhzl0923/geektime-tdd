@@ -1,9 +1,11 @@
 package geektime.tdd.di;
 
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import java.lang.reflect.ParameterizedType;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.eq;
@@ -15,10 +17,13 @@ public class InjectionTest {
     private Dependency dependency = new Dependency() {
     };
     private Context context = mock(Context.class);
+    private Provider<Dependency> dependencyProvider = mock(Provider.class);
 
     @BeforeEach
-    public void setup() {
+    public void setup() throws NoSuchFieldException {
+        ParameterizedType type = (ParameterizedType) InjectionTest.class.getDeclaredField("dependencyProvider").getGenericType();
         when(context.get(eq(Dependency.class))).thenReturn(Optional.of(dependency));
+        when(context.get(eq(type))).thenReturn(Optional.of(dependencyProvider));
     }
 
     @Nested
@@ -64,6 +69,22 @@ public class InjectionTest {
                 public Dependency getDependency() {
                     return dependency;
                 }
+            }
+            // support provider inject constructor
+
+            static class ProviderInjectConstructor {
+                Provider<Dependency> dependency;
+
+                @Inject
+                public ProviderInjectConstructor(Provider<Dependency> dependency) {
+                    this.dependency = dependency;
+                }
+            }
+
+            @Test
+            public void should_inject_provider_via_inject_constructor() {
+                ProviderInjectConstructor instance = new InjectProvider<>(ProviderInjectConstructor.class).get(context);
+                assertSame(dependencyProvider, instance.dependency);
             }
         }
 
@@ -125,6 +146,8 @@ public class InjectionTest {
                 }
             }
         }
+
+
     }
 
     @Nested
@@ -164,6 +187,18 @@ public class InjectionTest {
                 assertArrayEquals(new Class<?>[]{Dependency.class}, provider.getDependencies().toArray(Class<?>[]::new));
             }
 
+            //TODO support inject filed
+            static class ProviderInjectField {
+                @Inject
+                Provider<Dependency> dependency;
+            }
+
+            @Test
+            public void should_inject_provider_via_inject_method() {
+                ProviderInjectField instance = new InjectProvider<>(ProviderInjectField.class).get(context);
+                assertSame(dependencyProvider, instance.dependency);
+            }
+
         }
 
         @Nested
@@ -179,6 +214,8 @@ public class InjectionTest {
                 assertThrows(IllegalComponentException.class, () -> new InjectProvider<>(FinalInjectField.class));
             }
         }
+
+
     }
 
     @Nested
@@ -278,6 +315,22 @@ public class InjectionTest {
                 InjectProvider<InjectMethodWithDependency> provider = new InjectProvider<>(InjectMethodWithDependency.class);
                 assertArrayEquals(new Class<?>[]{Dependency.class}, provider.getDependencies().toArray(Class<?>[]::new));
             }
+
+            // support provider inject method
+            static class ProviderInjectMethod {
+                Provider<Dependency> dependency;
+
+                @Inject
+                void install(Provider<Dependency> dependency) {
+                    this.dependency = dependency;
+                }
+            }
+
+            @Test
+            public void should_inject_provider_via_inject_method() {
+                ProviderInjectMethod instance = new InjectProvider<>(ProviderInjectMethod.class).get(context);
+                assertSame(dependencyProvider, instance.dependency);
+            }
         }
 
         @Nested
@@ -295,6 +348,7 @@ public class InjectionTest {
                 assertThrows(IllegalComponentException.class, () -> new InjectProvider<>(InjectMethodWithTypeParameter.class));
             }
         }
+
     }
 }
 

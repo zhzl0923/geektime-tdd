@@ -52,9 +52,9 @@ class InjectProvider<T> implements ComponentProvider<T> {
 
     private List<Method> getInjectMethods(Class<T> component) {
         List<Method> injectMethods = traverse(component, (methods, current) -> injectable(current.getDeclaredMethods())
-                        .filter(m -> isOverrideByInjectMethod(methods, m))
-                        .filter(m -> isOverrideByNoInjectMethod(component, m))
-                        .toList());
+                .filter(m -> isOverrideByInjectMethod(methods, m))
+                .filter(m -> isOverrideByNoInjectMethod(component, m))
+                .toList());
         Collections.reverse(injectMethods);
         return injectMethods;
     }
@@ -107,10 +107,17 @@ class InjectProvider<T> implements ComponentProvider<T> {
     }
 
     private static Object[] toDependencies(Context context, Executable executable) {
-        return stream(executable.getParameterTypes()).map(type -> context.get(type).get()).toArray(Object[]::new);
+        return stream(executable.getParameters()).map(
+                p -> {
+                    Type type = p.getParameterizedType();
+                    if (type instanceof ParameterizedType) return context.get((ParameterizedType) type).get();
+                    return context.get((Class<?>) type).get();
+                }).toArray(Object[]::new);
     }
 
     private static Object toDependency(Context context, Field field) {
-        return context.get(field.getType()).get();
+        Type type = field.getGenericType();
+        if (type instanceof ParameterizedType) return context.get((ParameterizedType) type).get();
+        return context.get((Class<?>) type).get();
     }
 }
