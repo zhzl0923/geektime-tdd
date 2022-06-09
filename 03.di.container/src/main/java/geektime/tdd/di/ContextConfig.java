@@ -1,6 +1,9 @@
 package geektime.tdd.di;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Stack;
 
 public class ContextConfig {
     private final Map<Class<?>, ComponentProvider<?>> providers;
@@ -9,23 +12,13 @@ public class ContextConfig {
         providers = new HashMap<>();
     }
 
-    public <Type> void bind(Class<Type> type, Type instance) {
-        providers.put(type, new ComponentProvider<Type>() {
-            @Override
-            public Type get(Context context) {
-                return instance;
-            }
-
-            @Override
-            public List<Class<?>> getDependencies() {
-                return List.of();
-            }
-        });
+    public <T> void bind(Class<T> type, T instance) {
+        providers.put(type, (ComponentProvider<T>) context -> instance);
     }
 
-    public <Type, Implementation extends Type>
-    void bind(Class<Type> type, Class<Implementation> implementation) {
-        providers.put(type, new ConstructorInjectProvider<>(implementation));
+    public <T, R extends T>
+    void bind(Class<T> type, Class<R> implementation) {
+        providers.put(type, new InjectProvider<>(implementation));
     }
 
     @SuppressWarnings("unchecked")
@@ -33,8 +26,8 @@ public class ContextConfig {
         providers.keySet().forEach(component -> checkDependencies(component, new Stack<>()));
         return new Context() {
             @Override
-            public <Type> Optional<Type> get(Class<Type> type) {
-                return Optional.ofNullable(providers.get(type)).map(provider -> (Type) provider.get(this));
+            public <T> Optional<T> get(Class<T> type) {
+                return Optional.ofNullable(providers.get(type)).map(provider -> (T) provider.get(this));
             }
         };
     }
