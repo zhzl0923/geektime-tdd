@@ -5,13 +5,13 @@ import java.util.Set;
 import java.util.Stack;
 
 public class CyclicDependenciesFoundException extends RuntimeException {
-    private Set<Class<?>> components = new HashSet<>();
+    private final Set<Component> components = new HashSet<>();
 
-    public CyclicDependenciesFoundException(Stack<Class<?>> visiting) {
+    public CyclicDependenciesFoundException(Stack<Component> visiting) {
         components.addAll(visiting);
     }
 
     public Class<?>[] getComponents() {
-        return components.toArray(Class<?>[]::new);
+        return components.stream().map(Component::type).toArray(Class<?>[]::new);
     }
 }

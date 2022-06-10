@@ -1,59 +1,77 @@
 package geektime.tdd.di;
 
 import jakarta.inject.Provider;
-import java.lang.reflect.ParameterizedType;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Stack;
+import jakarta.inject.Qualifier;
+import java.lang.annotation.Annotation;
+import java.util.*;
 
 public class ContextConfig {
-    private final Map<Class<?>, ComponentProvider<?>> providers;
+    private final Map<Component, ComponentProvider<?>> components;
+
 
     public ContextConfig() {
-        providers = new HashMap<>();
+        components = new HashMap<>();
     }
 
-    public <T> void bind(Class<T> type, T instance) {
-        providers.put(type, (ComponentProvider<T>) context -> instance);
+    public <Type> void bind(Class<Type> type, Type instance) {
+        components.put(new Component(type, null), (ComponentProvider<Type>) context -> instance);
     }
 
-    public <T, R extends T>
-    void bind(Class<T> type, Class<R> implementation) {
-        providers.put(type, new InjectProvider<>(implementation));
+    public <Type> void bind(Class<Type> type, Type instance, Annotation... qualifiers) {
+        if (Arrays.stream(qualifiers).anyMatch(q -> !q.annotationType().isAnnotationPresent(Qualifier.class)))
+            throw new IllegalComponentException();
+        for (Annotation qualifier : qualifiers)
+            components.put(new Component(type, qualifier), (ComponentProvider<Type>) context -> instance);
+    }
+
+    public <Type, Implementation extends Type>
+    void bind(Class<Type> type, Class<Implementation> implementation) {
+        components.put(new Component(type, null), new InjectProvider<>(implementation));
+    }
+
+    public <Type, Implementation extends Type>
+    void bind(Class<Type> type, Class<Implementation> implementation, Annotation... qualifiers) {
+        if (Arrays.stream(qualifiers).anyMatch(q -> !q.annotationType().isAnnotationPresent(Qualifier.class)))
+            throw new IllegalComponentException();
+        for (Annotation qualifier : qualifiers)
+            components.put(new Component(type, qualifier), new InjectProvider<>(implementation));
     }
 
     @SuppressWarnings("unchecked")
     public Context getContext() {
-        providers.keySet().forEach(component -> checkDependencies(component, new Stack<>()));
+        components.keySet().forEach(component -> checkDependencies(component, new Stack<>()));
         return new Context() {
-            @Override
-            public <T> Optional<T> get(Class<T> type) {
-                return Optional.ofNullable(providers.get(type)).map(provider -> (T) provider.get(this));
-            }
-
-            @Override
-            public Optional get(ParameterizedType type) {
-                if (type.getRawType() != Provider.class) return Optional.empty();
-                Class<?> componentType = (Class<?>) type.getActualTypeArguments()[0];
-                return Optional.ofNullable(providers.get(componentType)).map(provider -> (Provider<Object>) () -> provider.get(this));
+            public <ComponentType> Optional<ComponentType> get(ComponentRef<ComponentType> ref) {
+                if (ref.isContainer()) {
+                    if (ref.getContainer() != Provider.class) return Optional.empty();
+                    return (Optional<ComponentType>) Optional.ofNullable(components.get(ref.component()))
+                            .map(provider -> (Provider<Object>) () -> provider.get(this));
+                }
+                return Optional.ofNullable(components.get(ref.component())).map(provider -> (ComponentType) provider.get(this));
             }
         };
     }
 
-    private void checkDependencies(Class<?> component, Stack<Class<?>> visiting) {
-        for (Class<?> dependency : providers.get(component).getDependencies()) {
-            if (!providers.containsKey(dependency)) throw new DependencyNotFoundException(component, dependency);
-            if (visiting.contains(dependency)) throw new CyclicDependenciesFoundException(visiting);
-            visiting.push(dependency);
-            checkDependencies(dependency, visiting);
-            visiting.pop();
+    private void checkDependencies(Component component, Stack<Component> visiting) {
+        for (ComponentRef dependency : components.get(component).getDependencies()) {
+            if (!components.containsKey(dependency.component()))
+                throw new DependencyNotFoundException(component, dependency.component());
+            if (!dependency.isContainer()) {
+                if (visiting.contains(dependency.component()))
+                    throw new CyclicDependenciesFoundException(visiting);
+                visiting.push(dependency.component());
+                checkDependencies(dependency.component(), visiting);
+                visiting.pop();
+            }
+        }
+    }
+
+    interface ComponentProvider<T> {
+        T get(Context context);
+
+        default List<ComponentRef> getDependencies() {
+            return List.of();
         }
     }
 }
 
-interface Context {
-    <T> Optional<T> get(Class<T> type);
-
-    Optional get(ParameterizedType type);
-}

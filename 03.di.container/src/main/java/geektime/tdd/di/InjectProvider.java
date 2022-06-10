@@ -1,6 +1,8 @@
 package geektime.tdd.di;
 
 import jakarta.inject.Inject;
+import jakarta.inject.Qualifier;
+import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,7 +13,7 @@ import java.util.stream.Stream;
 import static java.util.Arrays.stream;
 import static java.util.stream.Stream.concat;
 
-class InjectProvider<T> implements ComponentProvider<T> {
+class InjectProvider<T> implements ContextConfig.ComponentProvider<T> {
     private Constructor<T> injectConstructor;
     private List<Field> injectFields;
     private List<Method> injectMethods;
@@ -42,12 +44,20 @@ class InjectProvider<T> implements ComponentProvider<T> {
         }
     }
 
-
     @Override
-    public List<Class<?>> getDependencies() {
-        return concat(concat(stream(injectConstructor.getParameterTypes()),
-                        injectFields.stream().map(Field::getType)),
-                injectMethods.stream().flatMap(m -> stream(m.getParameterTypes()))).toList();
+    public List<ComponentRef> getDependencies() {
+        return concat(concat(stream(injectConstructor.getParameters()).map(p -> toComponentRef(p)),
+                        injectFields.stream().map(Field::getGenericType).map(type -> ComponentRef.of(type, null))),
+                injectMethods.stream().flatMap(m -> stream(m.getParameters()).map(Parameter::getParameterizedType).map(type1 -> ComponentRef.of(type1, null))))
+                .toList();
+    }
+
+    private ComponentRef<?> toComponentRef(Parameter p) {
+        Annotation qualifier = stream(p.getAnnotations())
+                .filter(a -> a.annotationType().isAnnotationPresent(Qualifier.class))
+                .findFirst()
+                .orElse(null);
+        return ComponentRef.of(p.getParameterizedType(),qualifier);
     }
 
     private List<Method> getInjectMethods(Class<T> component) {
@@ -108,16 +118,14 @@ class InjectProvider<T> implements ComponentProvider<T> {
 
     private static Object[] toDependencies(Context context, Executable executable) {
         return stream(executable.getParameters()).map(
-                p -> {
-                    Type type = p.getParameterizedType();
-                    if (type instanceof ParameterizedType) return context.get((ParameterizedType) type).get();
-                    return context.get((Class<?>) type).get();
-                }).toArray(Object[]::new);
+                p -> toDependency(context, p.getParameterizedType())).toArray(Object[]::new);
     }
 
     private static Object toDependency(Context context, Field field) {
-        Type type = field.getGenericType();
-        if (type instanceof ParameterizedType) return context.get((ParameterizedType) type).get();
-        return context.get((Class<?>) type).get();
+        return toDependency(context, field.getGenericType());
+    }
+
+    private static Object toDependency(Context context, Type type) {
+        return context.get(ComponentRef.of(type, null)).get();
     }
 }
