@@ -426,7 +426,7 @@ public class ContextTest {
                 }
             }
 
-            //TODO check cyclic dependencies with qualifier
+            // check cyclic dependencies with qualifier
             static class SkywalkerDependency implements Dependency {
                 @Inject
                 public SkywalkerDependency(@jakarta.inject.Named("ChoseOne") Dependency dependency) {
