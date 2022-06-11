@@ -4,42 +4,40 @@ import jakarta.inject.Inject;
 import jakarta.inject.Qualifier;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 import static java.util.Arrays.stream;
 import static java.util.stream.Stream.concat;
 
 class InjectProvider<T> implements ContextConfig.ComponentProvider<T> {
-    private Constructor<T> injectConstructor;
-    private List<Field> injectFields;
-    private List<Method> injectMethods;
-    private List<ComponentRef> dependencies;
-
+    private final Injectable<Constructor<T>> injectConstructor;
+    private final List<Injectable<Method>> injectMethods;
+    private final List<Injectable<Field>> injectFields;
 
     public InjectProvider(Class<T> component) {
         if (Modifier.isAbstract(component.getModifiers())) throw new IllegalComponentException();
+
         this.injectConstructor = getInjectConstructor(component);
-        this.injectFields = getInjectFields(component);
         this.injectMethods = getInjectMethods(component);
-        if (injectFields.stream().anyMatch(f -> Modifier.isFinal(f.getModifiers())))
+        this.injectFields = getInjectFields(component);
+
+        if (injectFields.stream().map(Injectable::element).anyMatch(f -> Modifier.isFinal(f.getModifiers())))
             throw new IllegalComponentException();
-        if (injectMethods.stream().anyMatch(m -> m.getTypeParameters().length != 0))
+        if (injectMethods.stream().map(Injectable::element).anyMatch(m -> m.getTypeParameters().length != 0))
             throw new IllegalComponentException();
-        this.dependencies = getDependencies();
+
     }
+
 
     @Override
     public T get(Context context) {
         try {
-            T instance = injectConstructor.newInstance(toDependencies(context, injectConstructor));
-            for (Field field : injectFields)
-                field.set(instance, toDependency(context, field));
-            for (Method method : injectMethods)
-                method.invoke(instance, toDependencies(context, method));
+            T instance = injectConstructor.element().newInstance(injectConstructor.toDependencies(context));
+            for (Injectable<Field> field : injectFields)
+                field.element.set(instance, field.toDependencies(context)[0]);
+            for (Injectable<Method> method : injectMethods)
+                method.element().invoke(instance, method.toDependencies(context));
             return instance;
         } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
             throw new RuntimeException(e);
@@ -47,49 +45,71 @@ class InjectProvider<T> implements ContextConfig.ComponentProvider<T> {
     }
 
     @Override
-    public List<ComponentRef> getDependencies() {
-        return concat(concat(stream(injectConstructor.getParameters()).map(this::toComponentRef),
-                        injectFields.stream().map(f -> toComponentRef(f))),
-                injectMethods.stream().flatMap(m -> stream(m.getParameters()).map(this::toComponentRef)))
-                .toList();
+    public List<ComponentRef<?>> getDependencies() {
+        return concat(concat(Stream.of(injectConstructor), injectFields.stream()), injectMethods.stream())
+                .flatMap(i -> stream(i.required)).toList();
     }
 
-    private ComponentRef toComponentRef(Field field) {
-        Annotation qualifier = getQualifier(field);
-        return ComponentRef.of(field.getGenericType(), qualifier);
+    static record Injectable<Element extends AccessibleObject>(Element element, ComponentRef<?>[] required) {
+        static <Element extends Executable> Injectable<Element> of(Element constructor) {
+            return new Injectable<>(constructor, stream(constructor.getParameters()).map(Injectable::toComponentRef).toArray(ComponentRef<?>[]::new));
+        }
+
+        static Injectable<Field> of(Field field) {
+            return new Injectable<>(field, new ComponentRef<?>[]{toComponentRef(field)});
+        }
+
+        Object[] toDependencies(Context context) {
+            return stream(required).map(context::get).map(Optional::get).toArray();
+        }
+
+        private static ComponentRef toComponentRef(Field field) {
+            Annotation qualifier = getQualifier(field);
+            return ComponentRef.of(field.getGenericType(), qualifier);
+        }
+
+        private static ComponentRef<?> toComponentRef(Parameter parameter) {
+            Annotation qualifier = getQualifier(parameter);
+            return ComponentRef.of(parameter.getParameterizedType(), qualifier);
+        }
+
+        private static Annotation getQualifier(AnnotatedElement parameter) {
+            List<Annotation> qualifiers = stream(parameter.getAnnotations())
+                    .filter(a -> a.annotationType().isAnnotationPresent(Qualifier.class)).toList();
+            if (qualifiers.size() > 1) throw new IllegalComponentException();
+            return qualifiers.stream().findFirst().orElse(null);
+        }
+
     }
 
-    private ComponentRef<?> toComponentRef(Parameter parameter) {
-        Annotation qualifier = getQualifier(parameter);
-        return ComponentRef.of(parameter.getParameterizedType(), qualifier);
+
+    @SuppressWarnings("unchecked")
+    private static <T> Injectable<Constructor<T>> getInjectConstructor(Class<T> component) {
+        List<Constructor<?>> injectConstructors = injectable(component.getDeclaredConstructors()).toList();
+        if (injectConstructors.size() > 1) throw new IllegalComponentException();
+        return Injectable.of((Constructor<T>) injectConstructors.stream().findFirst().orElseGet(() -> defaultConstructor(component)));
     }
 
-    private static Annotation getQualifier(AnnotatedElement parameter) {
-        List<Annotation> qualifiers = stream(parameter.getAnnotations())
-                .filter(a -> a.annotationType().isAnnotationPresent(Qualifier.class)).toList();
-        if (qualifiers.size() > 1) throw new IllegalComponentException();
-        return qualifiers.stream().findFirst().orElse(null);
+    private static List<Injectable<Field>> getInjectFields(Class<?> component) {
+        List<Field> injectFields = traverse(component, (fields, current) -> injectable(current.getDeclaredFields()).toList());
+        return injectFields.stream().map(Injectable::of).toList();
     }
 
-    private List<Method> getInjectMethods(Class<T> component) {
+    private static List<Injectable<Method>> getInjectMethods(Class<?> component) {
         List<Method> injectMethods = traverse(component, (methods, current) -> injectable(current.getDeclaredMethods())
                 .filter(m -> isOverrideByInjectMethod(methods, m))
                 .filter(m -> isOverrideByNoInjectMethod(component, m))
                 .toList());
         Collections.reverse(injectMethods);
-        return injectMethods;
+        return injectMethods.stream().map(Injectable::of).toList();
     }
 
-
-    private static <T> List<Field> getInjectFields(Class<T> component) {
-        return traverse(component, (fields, current) -> injectable(current.getDeclaredFields()).toList());
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> Constructor<T> getInjectConstructor(Class<T> implementation) {
-        List<Constructor<?>> injectConstructors = injectable(implementation.getDeclaredConstructors()).toList();
-        if (injectConstructors.size() > 1) throw new IllegalComponentException();
-        return (Constructor<T>) injectConstructors.stream().findFirst().orElseGet(() -> defaultConstructor(implementation));
+    private static <T> Constructor<T> defaultConstructor(Class<T> implementation) {
+        try {
+            return implementation.getDeclaredConstructor();
+        } catch (NoSuchMethodException e) {
+            throw new IllegalComponentException();
+        }
     }
 
     private static <T> List<T> traverse(Class<?> component, BiFunction<List<T>, Class<?>, List<T>> finder) {
@@ -101,15 +121,6 @@ class InjectProvider<T> implements ContextConfig.ComponentProvider<T> {
         }
         return members;
     }
-
-    private static <T> Constructor<T> defaultConstructor(Class<T> implementation) {
-        try {
-            return implementation.getDeclaredConstructor();
-        } catch (NoSuchMethodException e) {
-            throw new IllegalComponentException();
-        }
-    }
-
 
     private static <T extends AnnotatedElement> Stream<T> injectable(T[] fields) {
         return stream(fields).filter(f -> f.isAnnotationPresent(Inject.class));
@@ -127,16 +138,5 @@ class InjectProvider<T> implements ContextConfig.ComponentProvider<T> {
         return injectMethods.stream().noneMatch(o -> isOverride(m, o));
     }
 
-    private static Object[] toDependencies(Context context, Executable executable) {
-        return stream(executable.getParameters()).map(
-                p -> toDependency(context, p.getParameterizedType(), getQualifier(p))).toArray(Object[]::new);
-    }
 
-    private static Object toDependency(Context context, Field field) {
-        return toDependency(context, field.getGenericType(), getQualifier(field));
-    }
-
-    private static Object toDependency(Context context, Type type, Annotation qualifier) {
-        return context.get(ComponentRef.of(type, qualifier)).get();
-    }
 }
