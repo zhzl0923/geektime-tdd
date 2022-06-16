@@ -3,6 +3,7 @@ package geektime.tdd.di;
 import com.google.common.collect.Sets;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
+import jakarta.inject.Singleton;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Nested;
@@ -10,10 +11,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import java.lang.annotation.Annotation;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import static java.lang.annotation.RetentionPolicy.RUNTIME;
 import static org.junit.jupiter.api.Assertions.*;
 
 @Nested
@@ -199,7 +202,124 @@ public class ContextTest {
             }
         }
 
+        @Nested
+        public class WithScopeTest {
+            //  default scope should not be singleton
+            static class NotSingleton {
 
+            }
+
+            @Test
+            public void should_not_be_singleton_scope_by_default() {
+                config.bind(NotSingleton.class, NotSingleton.class);
+                Context context = config.getContext();
+
+                assertNotSame(
+                        context.get(ComponentRef.of(NotSingleton.class)).get(),
+                        context.get(ComponentRef.of(NotSingleton.class)).get()
+                );
+            }
+
+            //  bind component as singleton scoped
+            @Test
+            public void should_bind_component_as_singleton_scoped() {
+                config.bind(NotSingleton.class, NotSingleton.class, new SingletonLiteral());
+                Context context = config.getContext();
+
+                assertSame(
+                        context.get(ComponentRef.of(NotSingleton.class)).get(),
+                        context.get(ComponentRef.of(NotSingleton.class)).get()
+                );
+            }
+
+            //  get scope from component class
+            @Singleton
+            static class SingletonAnnotated implements Dependency {
+            }
+
+            @Test
+            public void should_retrieve_scope_annotation_from_component() {
+                config.bind(Dependency.class, SingletonAnnotated.class);
+
+                Context context = config.getContext();
+                assertSame(context.get(ComponentRef.of(Dependency.class)).get(),
+                        context.get(ComponentRef.of(Dependency.class)).get());
+            }
+
+
+            //  bind component with customize scope annotation
+
+            @Test
+            public void should_bind_component_as_customize_scope_annotation() {
+
+                config.scope(Pooled.class, PoolProvider::new);
+
+                config.bind(NotSingleton.class, NotSingleton.class, new PooledLiteral());
+                Context context = config.getContext();
+                List<NotSingleton> instances = IntStream.range(0, 5).mapToObj(i -> context.get(ComponentRef.of(NotSingleton.class)).get()).toList();
+
+                assertEquals(PoolProvider.MAX, new HashSet<>(instances).size());
+            }
+
+            // multi scope provided
+            @Test
+            public void should_throw_exception_if_multi_scope_provided() {
+                assertThrows(IllegalComponentException.class, () ->
+                        config.bind(NotSingleton.class, NotSingleton.class, new SingletonLiteral(), new PooledLiteral()));
+            }
+            // multi scope annotated
+
+            @Singleton @Pooled
+            static class MultiScopeAnnotated {
+
+            }
+
+            @Test
+            public void should_throw_exception_if_multi_scope_annotated() {
+                assertThrows(IllegalComponentException.class, () ->
+                        config.bind(MultiScopeAnnotated.class, MultiScopeAnnotated.class));
+            }
+            //TODO undefined scope
+            @Test
+            public void should_throw_exception_if_scope_undefined() {
+                assertThrows(IllegalComponentException.class,()->config.bind(NotSingleton.class, NotSingleton.class, new PooledLiteral()));
+            }
+
+            @Nested
+            public class WithQualifierTest {
+                @Test
+                public void should_not_be_singleton_scope_by_default() {
+                    config.bind(NotSingleton.class, NotSingleton.class, new SkywalkerLiteral());
+                    Context context = config.getContext();
+                    assertNotSame(
+                            context.get(ComponentRef.of(NotSingleton.class, new SkywalkerLiteral())).get(),
+                            context.get(ComponentRef.of(NotSingleton.class, new SkywalkerLiteral())).get()
+                    );
+                }
+
+                //  bind component with qualifiers as singleton scoped
+                @Test
+                public void should_bind_component_as_singleton_scoped() {
+                    config.bind(NotSingleton.class, NotSingleton.class, new SingletonLiteral(), new SkywalkerLiteral());
+                    Context context = config.getContext();
+
+                    assertSame(
+                            context.get(ComponentRef.of(NotSingleton.class, new SkywalkerLiteral())).get(),
+                            context.get(ComponentRef.of(NotSingleton.class, new SkywalkerLiteral())).get()
+                    );
+                }
+
+                //  get scope from component with qualifier
+                @Test
+                public void should_retrieve_scope_annotation_from_component() {
+                    config.bind(Dependency.class, SingletonAnnotated.class, new SkywalkerLiteral());
+
+                    Context context = config.getContext();
+                    assertSame(context.get(ComponentRef.of(Dependency.class, new SkywalkerLiteral())).get(),
+                            context.get(ComponentRef.of(Dependency.class, new SkywalkerLiteral())).get());
+                }
+            }
+        }
     }
 
     @Nested
@@ -221,7 +341,9 @@ public class ContextTest {
                     Arguments.of(Named.of("Missing Dependency Method", MissingDependencyMethod.class)),
                     Arguments.of(Named.of("Missing Dependency Provider Constructor", MissingDependencyProviderConstructor.class)),
                     Arguments.of(Named.of("Missing Dependency Provider Field", MissingDependencyProviderField.class)),
-                    Arguments.of(Named.of("Missing Dependency Provider Method", MissingDependencyProviderMethod.class))
+                    Arguments.of(Named.of("Missing Dependency Provider Method", MissingDependencyProviderMethod.class)),
+                    Arguments.of(Named.of("Missing Dependency Scoped", MissingDependencyScoped.class)),
+                    Arguments.of(Named.of("Missing Dependency Scoped Provider", MissingDependencyProviderScoped.class))
             );
         }
 
@@ -259,6 +381,17 @@ public class ContextTest {
             }
         }
 
+        @Singleton
+        static class MissingDependencyScoped implements TestComponent {
+            @Inject
+            Dependency dependency;
+        }
+
+        @Singleton
+        static class MissingDependencyProviderScoped implements TestComponent {
+            @Inject
+            Provider<Dependency> dependency;
+        }
 
         @ParameterizedTest(name = "cyclic dependency between {0} and {1}")
         @MethodSource("should_throw_exception_if_cyclic_dependencies_found")
@@ -554,53 +687,14 @@ public class ContextTest {
                 return arguments.stream();
             }
         }
+
+//        @Nested
+//        public class WithScopeTest {
+//
+//            //  cyclic dependencies with scope
+//        }
     }
 
 }
 
 
-record NamedLiteral(String value) implements jakarta.inject.Named {
-
-    @Override
-    public Class<? extends Annotation> annotationType() {
-        return jakarta.inject.Named.class;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (o instanceof jakarta.inject.Named named) return Objects.equals(value, named.value());
-        return false;
-    }
-
-    @Override
-    public int hashCode() {
-        return "value".hashCode() * 127 ^ value.hashCode();
-    }
-}
-
-@java.lang.annotation.Documented
-@java.lang.annotation.Retention(RUNTIME)
-@jakarta.inject.Qualifier
-@interface Skywalker {
-}
-
-record SkywalkerLiteral() implements Skywalker {
-
-    @Override
-    public Class<? extends Annotation> annotationType() {
-        return Skywalker.class;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        return o instanceof Skywalker;
-    }
-}
-
-record TestLiteral() implements Test {
-
-    @Override
-    public Class<? extends Annotation> annotationType() {
-        return Test.class;
-    }
-}

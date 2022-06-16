@@ -318,7 +318,7 @@ public class InjectionTest {
                 );
             }
 
-            //TODO throw illegal component if illegal qualifier given to injection point
+            // throw illegal component if illegal qualifier given to injection point
 
 
             static class MultiQualifierInjectField {
